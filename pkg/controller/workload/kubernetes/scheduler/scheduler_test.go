@@ -1,5 +1,5 @@
 /*
-Copyright 2018 The Crossplane Authors.
+Copyright 2019 The Crossplane Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -23,7 +23,6 @@ import (
 
 	"github.com/google/go-cmp/cmp"
 	"github.com/pkg/errors"
-	corev1 "k8s.io/api/core/v1"
 	kerrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -33,11 +32,10 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	computev1alpha1 "github.com/crossplaneio/crossplane/pkg/apis/compute/v1alpha1"
-	corev1alpha1 "github.com/crossplaneio/crossplane/pkg/apis/core/v1alpha1"
-	workloadv1alpha1 "github.com/crossplaneio/crossplane/pkg/apis/workload/v1alpha1"
-	"github.com/crossplaneio/crossplane/pkg/controller/core"
-	"github.com/crossplaneio/crossplane/pkg/test"
+	runtimev1alpha1 "github.com/crossplane/crossplane-runtime/apis/core/v1alpha1"
+	"github.com/crossplane/crossplane-runtime/pkg/logging"
+	"github.com/crossplane/crossplane-runtime/pkg/test"
+	workloadv1alpha1 "github.com/crossplane/crossplane/apis/workload/v1alpha1"
 )
 
 const (
@@ -47,39 +45,34 @@ const (
 )
 
 var (
-	errorBoom = errors.New("boom")
-	meta      = metav1.ObjectMeta{Namespace: namespace, Name: name, UID: uid}
-	ctx       = context.Background()
+	errorBoom  = errors.New("boom")
+	objectMeta = metav1.ObjectMeta{Namespace: namespace, Name: name, UID: uid}
+	ctx        = context.Background()
 
-	selectorAll     = &metav1.LabelSelector{}
-	selectorInvalid = &metav1.LabelSelector{
-		MatchExpressions: []metav1.LabelSelectorRequirement{
-			{Operator: metav1.LabelSelectorOperator("wat")},
+	selectorAll = &metav1.LabelSelector{}
+
+	targetA = &workloadv1alpha1.KubernetesTarget{
+		ObjectMeta: metav1.ObjectMeta{Namespace: namespace, Name: "coolTargetA"},
+		Spec: runtimev1alpha1.TargetSpec{
+			WriteConnectionSecretToReference: &runtimev1alpha1.LocalSecretReference{},
+		},
+	}
+	targetB = &workloadv1alpha1.KubernetesTarget{
+		ObjectMeta: metav1.ObjectMeta{Namespace: namespace, Name: "coolTargetB"},
+		Spec: runtimev1alpha1.TargetSpec{
+			WriteConnectionSecretToReference: &runtimev1alpha1.LocalSecretReference{},
 		},
 	}
 
-	clusterA = &computev1alpha1.KubernetesCluster{
-		ObjectMeta: metav1.ObjectMeta{Namespace: namespace, Name: "coolClusterA"},
+	targets = &workloadv1alpha1.KubernetesTargetList{
+		Items: []workloadv1alpha1.KubernetesTarget{*targetA, *targetB},
 	}
-	clusterB = &computev1alpha1.KubernetesCluster{
-		ObjectMeta: metav1.ObjectMeta{Namespace: namespace, Name: "coolClusterB"},
-	}
-
-	clusters = &computev1alpha1.KubernetesClusterList{
-		Items: []computev1alpha1.KubernetesCluster{*clusterA, *clusterB},
-	}
-)
-
-// Frequently used conditions.
-var (
-	ready   = corev1alpha1.DeprecatedCondition{Type: corev1alpha1.DeprecatedReady, Status: corev1.ConditionTrue}
-	pending = corev1alpha1.DeprecatedCondition{Type: corev1alpha1.DeprecatedPending, Status: corev1.ConditionTrue}
 )
 
 type kubeAppModifier func(*workloadv1alpha1.KubernetesApplication)
 
-func withConditions(c ...corev1alpha1.DeprecatedCondition) kubeAppModifier {
-	return func(r *workloadv1alpha1.KubernetesApplication) { r.Status.DeprecatedConditionedStatus.Conditions = c }
+func withConditions(c ...runtimev1alpha1.Condition) kubeAppModifier {
+	return func(r *workloadv1alpha1.KubernetesApplication) { r.Status.SetConditions(c...) }
 }
 
 func withState(s workloadv1alpha1.KubernetesApplicationState) kubeAppModifier {
@@ -92,20 +85,20 @@ func withDeletionTimestamp(t time.Time) kubeAppModifier {
 	}
 }
 
-func withCluster(c *corev1.ObjectReference) kubeAppModifier {
+func withTarget(name string) kubeAppModifier {
 	return func(r *workloadv1alpha1.KubernetesApplication) {
-		r.Status.Cluster = c
+		r.Spec.Target = &workloadv1alpha1.KubernetesTargetReference{Name: name}
 	}
 }
 
-func withClusterSelector(s *metav1.LabelSelector) kubeAppModifier {
+func withTargetSelector(s *metav1.LabelSelector) kubeAppModifier {
 	return func(r *workloadv1alpha1.KubernetesApplication) {
-		r.Spec.ClusterSelector = s
+		r.Spec.TargetSelector = s
 	}
 }
 
 func kubeApp(rm ...kubeAppModifier) *workloadv1alpha1.KubernetesApplication {
-	r := &workloadv1alpha1.KubernetesApplication{ObjectMeta: meta}
+	r := &workloadv1alpha1.KubernetesApplication{ObjectMeta: objectMeta}
 
 	for _, m := range rm {
 		m(r)
@@ -124,8 +117,8 @@ func TestCreatePredicate(t *testing.T) {
 			name: "UnscheduledCluster",
 			event: event.CreateEvent{
 				Object: &workloadv1alpha1.KubernetesApplication{
-					Status: workloadv1alpha1.KubernetesApplicationStatus{
-						Cluster: nil,
+					Spec: workloadv1alpha1.KubernetesApplicationSpec{
+						Target: nil,
 					},
 				},
 			},
@@ -135,8 +128,8 @@ func TestCreatePredicate(t *testing.T) {
 			name: "ScheduledCluster",
 			event: event.CreateEvent{
 				Object: &workloadv1alpha1.KubernetesApplication{
-					Status: workloadv1alpha1.KubernetesApplicationStatus{
-						Cluster: &corev1.ObjectReference{Name: "coolClustetr"},
+					Spec: workloadv1alpha1.KubernetesApplicationSpec{
+						Target: &workloadv1alpha1.KubernetesTargetReference{Name: "coolTarget"},
 					},
 				},
 			},
@@ -170,8 +163,8 @@ func TestUpdatePredicate(t *testing.T) {
 			name: "UnscheduledCluster",
 			event: event.UpdateEvent{
 				ObjectNew: &workloadv1alpha1.KubernetesApplication{
-					Status: workloadv1alpha1.KubernetesApplicationStatus{
-						Cluster: nil,
+					Spec: workloadv1alpha1.KubernetesApplicationSpec{
+						Target: nil,
 					},
 				},
 			},
@@ -181,8 +174,8 @@ func TestUpdatePredicate(t *testing.T) {
 			name: "ScheduledCluster",
 			event: event.UpdateEvent{
 				ObjectNew: &workloadv1alpha1.KubernetesApplication{
-					Status: workloadv1alpha1.KubernetesApplicationStatus{
-						Cluster: &corev1.ObjectReference{Name: "coolCluster"},
+					Spec: workloadv1alpha1.KubernetesApplicationSpec{
+						Target: &workloadv1alpha1.KubernetesTargetReference{Name: "coolTarget"},
 					},
 				},
 			},
@@ -209,138 +202,117 @@ func TestUpdatePredicate(t *testing.T) {
 
 func TestSchedule(t *testing.T) {
 	cases := []struct {
-		name       string
-		scheduler  scheduler
-		app        *workloadv1alpha1.KubernetesApplication
-		wantApp    *workloadv1alpha1.KubernetesApplication
-		wantResult reconcile.Result
+		name      string
+		scheduler scheduler
+		app       *workloadv1alpha1.KubernetesApplication
+		wantApp   *workloadv1alpha1.KubernetesApplication
+		wantErr   error
 	}{
 		{
 			name: "SuccessfulSchedule",
 			scheduler: &roundRobinScheduler{
 				kube: &test.MockClient{
-					MockList: func(_ context.Context, _ *client.ListOptions, obj runtime.Object) error {
-						*obj.(*computev1alpha1.KubernetesClusterList) = *clusters
+					MockList: func(_ context.Context, obj runtime.Object, _ ...client.ListOption) error {
+						*obj.(*workloadv1alpha1.KubernetesTargetList) = *targets
+						return nil
+					},
+					MockUpdate: func(_ context.Context, obj runtime.Object, _ ...client.UpdateOption) error {
+						got := obj.(*workloadv1alpha1.KubernetesApplication)
+
+						want := kubeApp(
+							withTargetSelector(selectorAll),
+							withTarget(targetA.GetName()),
+						)
+
+						if diff := cmp.Diff(want, got); diff != "" {
+							return errors.Errorf("MockUpdate: -want, +got: %s", diff)
+						}
+
 						return nil
 					},
 				},
 			},
-			app: kubeApp(withClusterSelector(selectorAll)),
+			app: kubeApp(withTargetSelector(selectorAll)),
 			wantApp: kubeApp(
-				withClusterSelector(selectorAll),
-				withCluster(clusterA.ObjectReference()),
-				withState(workloadv1alpha1.KubernetesApplicationStateScheduled),
-				withConditions(
-					corev1alpha1.DeprecatedCondition{
-						Type:   corev1alpha1.DeprecatedPending,
-						Status: corev1.ConditionFalse,
-					},
-					ready,
-				),
+				withTargetSelector(selectorAll),
+				withTarget(targetA.GetName()),
 			),
-			wantResult: reconcile.Result{Requeue: false},
 		},
 		{
-			name: "InvalidLabelSelector",
+			name: "SuccessfulScheduleNoSelector",
 			scheduler: &roundRobinScheduler{
 				kube: &test.MockClient{
-					MockList: func(_ context.Context, _ *client.ListOptions, obj runtime.Object) error {
-						*obj.(*computev1alpha1.KubernetesClusterList) = *clusters
+					MockList: func(_ context.Context, obj runtime.Object, _ ...client.ListOption) error {
+						*obj.(*workloadv1alpha1.KubernetesTargetList) = *targets
+						return nil
+					},
+					MockUpdate: func(_ context.Context, obj runtime.Object, _ ...client.UpdateOption) error {
+						got := obj.(*workloadv1alpha1.KubernetesApplication)
+
+						want := kubeApp(withTarget(targetA.GetName()))
+
+						if diff := cmp.Diff(want, got); diff != "" {
+							return errors.Errorf("MockUpdate: -want, +got: %s", diff)
+						}
+
 						return nil
 					},
 				},
 			},
-			app: kubeApp(withClusterSelector(selectorInvalid)),
-			wantApp: kubeApp(
-				withClusterSelector(selectorInvalid),
-				withState(workloadv1alpha1.KubernetesApplicationStatePending),
-				withConditions(
-					pending,
-					corev1alpha1.DeprecatedCondition{
-						Type:    corev1alpha1.DeprecatedFailed,
-						Status:  corev1.ConditionTrue,
-						Reason:  reasonUnschedulable,
-						Message: "\"wat\" is not a valid pod selector operator",
-					},
-				),
-			),
-			wantResult: reconcile.Result{Requeue: true},
+			app:     kubeApp(),
+			wantApp: kubeApp(withTarget(targetA.GetName())),
 		},
 		{
-			name: "ErrorListingClusters",
+			name: "ErrorListingTargets",
 			scheduler: &roundRobinScheduler{
 				kube: &test.MockClient{MockList: test.NewMockListFn(errorBoom)},
 			},
-			app: kubeApp(withClusterSelector(selectorAll)),
-			wantApp: kubeApp(
-				withClusterSelector(selectorAll),
-				withState(workloadv1alpha1.KubernetesApplicationStatePending),
-				withConditions(
-					pending,
-					corev1alpha1.DeprecatedCondition{
-						Type:    corev1alpha1.DeprecatedFailed,
-						Status:  corev1.ConditionTrue,
-						Reason:  reasonUnschedulable,
-						Message: errorBoom.Error(),
-					},
-				),
-			),
-			wantResult: reconcile.Result{Requeue: true},
+			app:     kubeApp(withTargetSelector(selectorAll)),
+			wantApp: kubeApp(withTargetSelector(selectorAll)),
+			wantErr: errors.Wrap(errorBoom, errListTargets),
 		},
 		{
-			name: "NoMatchingClusters",
+			name: "NoMatchingTargets",
 			scheduler: &roundRobinScheduler{
 				kube: &test.MockClient{
-					MockList: func(_ context.Context, _ *client.ListOptions, obj runtime.Object) error {
-						*obj.(*computev1alpha1.KubernetesClusterList) = computev1alpha1.KubernetesClusterList{}
+					MockList: func(_ context.Context, obj runtime.Object, _ ...client.ListOption) error {
+						*obj.(*workloadv1alpha1.KubernetesTargetList) = workloadv1alpha1.KubernetesTargetList{}
 						return nil
 					},
 				},
 			},
-			app: kubeApp(withClusterSelector(selectorAll)),
-			wantApp: kubeApp(
-				withClusterSelector(selectorAll),
-				withState(workloadv1alpha1.KubernetesApplicationStatePending),
-				withConditions(
-					pending,
-					corev1alpha1.DeprecatedCondition{
-						Type:    corev1alpha1.DeprecatedFailed,
-						Status:  corev1.ConditionTrue,
-						Reason:  reasonUnschedulable,
-						Message: errorNoclusters,
-					},
-				),
-			),
-			wantResult: reconcile.Result{Requeue: true},
+			app:     kubeApp(withTargetSelector(selectorAll)),
+			wantApp: kubeApp(withTargetSelector(selectorAll)),
+			wantErr: errors.New(errNoUsableTargets),
 		},
 	}
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			gotResult := tc.scheduler.schedule(ctx, tc.app)
+			gotErr := tc.scheduler.schedule(ctx, tc.app)
 
-			if diff := cmp.Diff(tc.wantResult, gotResult); diff != "" {
-				t.Errorf("tc.scheduler.Schedule(...): want != got:\n%s", diff)
+			if diff := cmp.Diff(tc.wantErr, gotErr, test.EquateErrors()); diff != "" {
+				t.Errorf("tc.scheduler.Schedule(...): -want, +got:\n%s", diff)
 			}
 
 			if diff := cmp.Diff(tc.wantApp, tc.app); diff != "" {
-				t.Errorf("app: want != got:\n%s", diff)
+				t.Errorf("app: -want, +got:\n%s", diff)
 			}
 		})
 	}
 }
 
-type mockScheduleFn func(ctx context.Context, app *workloadv1alpha1.KubernetesApplication) reconcile.Result
+type mockScheduleFn func(ctx context.Context, app *workloadv1alpha1.KubernetesApplication) error
 
-func newMockscheduleFn(r reconcile.Result) mockScheduleFn {
-	return func(_ context.Context, _ *workloadv1alpha1.KubernetesApplication) reconcile.Result { return r }
+func newMockscheduleFn(r error) mockScheduleFn {
+	return func(_ context.Context, _ *workloadv1alpha1.KubernetesApplication) error { return r }
 }
 
 type mockScheduler struct {
 	mockSchedule mockScheduleFn
 }
 
-func (s *mockScheduler) schedule(ctx context.Context, app *workloadv1alpha1.KubernetesApplication) reconcile.Result {
+func (s *mockScheduler) schedule(ctx context.Context, app *workloadv1alpha1.KubernetesApplication) error {
 	return s.mockSchedule(ctx, app)
 }
 
@@ -358,6 +330,7 @@ func TestReconcile(t *testing.T) {
 				kube: &test.MockClient{
 					MockGet: test.NewMockGetFn(kerrors.NewNotFound(schema.GroupResource{}, name)),
 				},
+				log: logging.NewNopLogger(),
 			},
 			req:        reconcile.Request{NamespacedName: types.NamespacedName{Namespace: namespace, Name: name}},
 			wantResult: reconcile.Result{Requeue: false},
@@ -367,6 +340,7 @@ func TestReconcile(t *testing.T) {
 			name: "FailedToGetExtantKubernetesApplication",
 			rec: &Reconciler{
 				kube: &test.MockClient{MockGet: test.NewMockGetFn(errorBoom)},
+				log:  logging.NewNopLogger(),
 			},
 			req:        reconcile.Request{NamespacedName: types.NamespacedName{Namespace: namespace, Name: name}},
 			wantResult: reconcile.Result{Requeue: false},
@@ -381,6 +355,7 @@ func TestReconcile(t *testing.T) {
 						return nil
 					},
 				},
+				log: logging.NewNopLogger(),
 			},
 			req:        reconcile.Request{NamespacedName: types.NamespacedName{Namespace: namespace, Name: name}},
 			wantResult: reconcile.Result{Requeue: false},
@@ -392,14 +367,15 @@ func TestReconcile(t *testing.T) {
 				kube: &test.MockClient{
 					MockGet: func(_ context.Context, key client.ObjectKey, obj runtime.Object) error {
 						*obj.(*workloadv1alpha1.KubernetesApplication) = *(kubeApp(
-							withCluster(&corev1.ObjectReference{Name: "coolCluster"}),
+							withTarget("coolTarget"),
 						))
 						return nil
 					},
 				},
+				log: logging.NewNopLogger(),
 			},
 			req:        reconcile.Request{NamespacedName: types.NamespacedName{Namespace: namespace, Name: name}},
-			wantResult: reconcile.Result{RequeueAfter: core.RequeueOnSuccess},
+			wantResult: reconcile.Result{Requeue: false},
 			wantErr:    nil,
 		},
 		{
@@ -411,12 +387,55 @@ func TestReconcile(t *testing.T) {
 						return nil
 					},
 					MockUpdate: test.NewMockUpdateFn(nil),
+					MockStatusUpdate: func(_ context.Context, obj runtime.Object, _ ...client.UpdateOption) error {
+						got := obj.(*workloadv1alpha1.KubernetesApplication)
+
+						want := kubeApp(
+							withConditions(runtimev1alpha1.ReconcileSuccess()),
+							withState(workloadv1alpha1.KubernetesApplicationStateScheduled),
+						)
+
+						if diff := cmp.Diff(want, got); diff != "" {
+							return errors.Errorf("MockUpdate: -want, +got: %s", diff)
+						}
+
+						return nil
+					},
 				},
-				scheduler: &mockScheduler{mockSchedule: newMockscheduleFn(reconcile.Result{Requeue: false})},
+				scheduler: &mockScheduler{mockSchedule: newMockscheduleFn(nil)},
+				log:       logging.NewNopLogger(),
 			},
 			req:        reconcile.Request{NamespacedName: types.NamespacedName{Namespace: namespace, Name: name}},
-			wantResult: reconcile.Result{Requeue: false},
+			wantResult: reconcile.Result{},
 			wantErr:    nil,
+		},
+		{
+			name: "SchedulingSuccessfulStatusUpdateFailed",
+			rec: &Reconciler{
+				kube: &test.MockClient{
+					MockGet: func(_ context.Context, key client.ObjectKey, obj runtime.Object) error {
+						*obj.(*workloadv1alpha1.KubernetesApplication) = *(kubeApp())
+						return nil
+					},
+					MockUpdate: func(_ context.Context, obj runtime.Object, _ ...client.UpdateOption) error {
+						got := obj.(*workloadv1alpha1.KubernetesApplication)
+
+						want := kubeApp(withTarget(targetA.GetName()))
+
+						if diff := cmp.Diff(want, got); diff != "" {
+							return errors.Errorf("MockUpdate: -want, +got: %s", diff)
+						}
+
+						return nil
+					},
+					MockStatusUpdate: test.NewMockStatusUpdateFn(errorBoom),
+				},
+				scheduler: &mockScheduler{mockSchedule: newMockscheduleFn(nil)},
+				log:       logging.NewNopLogger(),
+			},
+			req:        reconcile.Request{NamespacedName: types.NamespacedName{Namespace: namespace, Name: name}},
+			wantResult: reconcile.Result{},
+			wantErr:    errors.Wrap(errorBoom, errUpdateKubernetesApplicationStatus),
 		},
 		{
 			name: "SchedulingFailed",
@@ -426,13 +445,44 @@ func TestReconcile(t *testing.T) {
 						*obj.(*workloadv1alpha1.KubernetesApplication) = *(kubeApp())
 						return nil
 					},
-					MockUpdate: test.NewMockUpdateFn(errorBoom),
+					MockStatusUpdate: func(_ context.Context, obj runtime.Object, _ ...client.UpdateOption) error {
+						got := obj.(*workloadv1alpha1.KubernetesApplication)
+
+						want := kubeApp(
+							withConditions(runtimev1alpha1.ReconcileError(errorBoom)),
+							withState(workloadv1alpha1.KubernetesApplicationStatePending),
+						)
+
+						if diff := cmp.Diff(want, got); diff != "" {
+							return errors.Errorf("MockUpdate: -want, +got: %s", diff)
+						}
+
+						return nil
+					},
 				},
-				scheduler: &mockScheduler{mockSchedule: newMockscheduleFn(reconcile.Result{Requeue: false})},
+				scheduler: &mockScheduler{mockSchedule: newMockscheduleFn(errorBoom)},
+				log:       logging.NewNopLogger(),
 			},
 			req:        reconcile.Request{NamespacedName: types.NamespacedName{Namespace: namespace, Name: name}},
-			wantResult: reconcile.Result{Requeue: false},
-			wantErr:    errors.Wrapf(errorBoom, "cannot update %s %s/%s", workloadv1alpha1.KubernetesApplicationKind, namespace, name),
+			wantResult: reconcile.Result{RequeueAfter: shortWait},
+			wantErr:    nil,
+		},
+		{
+			name: "SchedulingFailedStatusUpdateFailed",
+			rec: &Reconciler{
+				kube: &test.MockClient{
+					MockGet: func(_ context.Context, key client.ObjectKey, obj runtime.Object) error {
+						*obj.(*workloadv1alpha1.KubernetesApplication) = *(kubeApp())
+						return nil
+					},
+					MockStatusUpdate: test.NewMockStatusUpdateFn(errorBoom),
+				},
+				scheduler: &mockScheduler{mockSchedule: newMockscheduleFn(errorBoom)},
+				log:       logging.NewNopLogger(),
+			},
+			req:        reconcile.Request{NamespacedName: types.NamespacedName{Namespace: namespace, Name: name}},
+			wantResult: reconcile.Result{RequeueAfter: shortWait},
+			wantErr:    errors.Wrap(errorBoom, errUpdateKubernetesApplicationStatus),
 		},
 	}
 
@@ -445,7 +495,7 @@ func TestReconcile(t *testing.T) {
 			}
 
 			if diff := cmp.Diff(tc.wantResult, gotResult); diff != "" {
-				t.Errorf("tc.rec.Reconcile(...): want != got:\n%s", diff)
+				t.Errorf("tc.rec.Reconcile(...): -want, +got:\n%s", diff)
 			}
 		})
 	}

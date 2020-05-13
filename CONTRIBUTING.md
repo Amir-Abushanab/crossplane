@@ -48,12 +48,15 @@ request and branch commits.
 
 This is a rough outline of what a contributor's workflow looks like:
 
-- Create a branch from where you want to base your work (usually master).
-- Make your changes and arrange them in readable commits.
-- Make sure your commit messages are in the proper format (see below).
-- Push your changes to the branch in your fork of the repository.
-- Make sure all linters and tests pass, and add any new tests as appropriate.
-- Submit a pull request to the original repository.
+1. Open an issue against this repository to propose your change.
+1. Consider writing a [one-pager or design doc](design/) if your proposal seems
+   complex or controversial.
+1. Create a branch from where you want to base your work (usually master).
+1. Make your changes and arrange them in readable commits.
+1. Make sure your commit messages are in the proper format (see below).
+1. Push your changes to the branch in your fork of the repository.
+1. Make sure all linters and tests pass, and add any new tests as appropriate.
+1. Submit a pull request to the original repository.
 
 ## Building
 
@@ -68,12 +71,12 @@ in CI if linter warnings are introduced:
 
 ```bash
 $ make build
-==> Linting /REDACTED/go/src/github.com/crossplaneio/crossplane/cluster/charts/crossplane
+==> Linting /REDACTED/go/src/github.com/crossplane/crossplane/cluster/charts/crossplane
 [INFO] Chart.yaml: icon is recommended
 
 1 chart(s) linted, no failures
 20:31:42 [ .. ] helm dep crossplane 0.1.0-136.g2dfb012.dirty
-No requirements found in /REDACTED/go/src/github.com/crossplaneio/crossplane/cluster/charts/crossplane/charts.
+No requirements found in /REDACTED/go/src/github.com/crossplane/crossplane/cluster/charts/crossplane/charts.
 20:31:42 [ OK ] helm dep crossplane 0.1.0-136.g2dfb012.dirty
 20:31:42 [ .. ] golangci-lint
 pkg/clients/azure/redis/redis.go:35:7: exported const `NamePrefix` should have comment or be unexported (golint)
@@ -113,7 +116,8 @@ https://blog.codinghorror.com/code-tells-you-how-comments-tell-you-why/
 For Go, Crossplane follows standard godoc guidelines.
 A concise godoc guideline can be found here: https://blog.golang.org/godoc-documenting-go-code
 
-## Commit Messages
+## Commits
+### Commit Messages
 
 We follow a rough convention for commit messages that is designed to answer two
 questions: what changed and why. The subject line should feature the what and
@@ -141,74 +145,18 @@ second line is always blank, and other lines should be wrapped at 80 characters.
 This allows the message to be easier to read on GitHub as well as in various
 git tools.
 
+### Commit History
+To prepare your branch to open a PR, you will need to have the minimal number of logical commits so we can maintain
+a clean commit history. Most commonly a PR will include a single commit where all changes are squashed, although
+sometimes there will be multiple logical commits. Please refer to [git documentation] for more information regarding rewriting the history. 
 
-## Adding New Resources
-
-### Project Organization
-The Crossplane project is based on and intially created by using [Kubebuilder is a framework for building Kubernetes APIs](https://github.com/kubernetes-sigs/kubebuilder).
-
-The Crossplane project organizes resources (api types and controllers) by grouping them by Cloud Provider with further sub-group by resource type 
-
-The Kubebuilder framework does not provide good support for projects with multiple groups and group tiers which contain resources with overlapping names. 
-For example:
-```
-pkg
-├── apis
-│   ├── aws
-│   │   ├── apis.go
-│   │   └── database
-│   │       ├── group.go
-│   │       └── v1alpha1
-│   │           ├── doc.go
-│   │           ├── rds_instance_types.go
-│   │           ├── rds_instance_types_test.go
-│   │           ├── register.go
-│   │           ├── v1alpha1_suite_test.go
-│   │           └── zz_generated.deepcopy.go
-│   └── gcp
-│       ├── apis.go
-│       └── database
-│           ├── group.go
-│           └── v1alpha1
-│               ├── cloudsql_instance_types.go
-│               ├── cloudsql_instance_types_test.go
-│               ├── doc.go
-│               ├── register.go
-│               ├── v1alpha1_suite_test.go
-│               └── zz_generated.deepcopy.go
-└── controller
-    ├── aws
-    │   ├── controller.go
-    │   └── database
-    │       ├── database_suite_test.go
-    │       ├── rds_instance.go
-    │       └── rds_instance_test.go
-    └── gcp
-        ├── controller.go
-        └── database
-            ├── cloudsql_instance.go
-            ├── cloudsql_instance_test.go
-            └── database_suite_test.go
-```
-In above example we have two groups with sub-group (tiers):
-- aws/rds
-- gcp/cloudsql
-
-In addition both groups contain types with the same name: `Instance`
-
-### Creating New Resource
-There are several different ways you can approach the creation of the new resources:
-#### Manual
-Good ol' copy & paste of existing resource for both apis and controller (if new controller is needed for your resource) and update the copied code to tailor your needs.
-
-#### Kubebuilder With New Project
-Create and Initialize a new (temporary) kubebuilder project and create new resources: apis and controller(s), then copy them into Crossplane project following the established project organization.
-
-To verify that new artifacts run: 
-```bash
-make build test
-```
+#### Pull Request feedback commits
+When addressing pull request comments, individual commits could be created to clearly indicate the change that results from addressing in each iteration. However, once all comments are addressed and reviewer have signed off, the feedback commits should all be squashed into the original logical change commits.
 
 ## Local Build and Test
 
 To learn more about the developer iteration workflow, including how to locally test new types/controllers, please refer to the [Local Build](cluster/local/README.md) instructions.
+
+
+
+[git documentation]: https://git-scm.com/book/en/v2/Git-Tools-Rewriting-History

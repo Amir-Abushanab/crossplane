@@ -1,30 +1,36 @@
-apiVersion: storage.aws.crossplane.io/v1alpha1
+apiVersion: storage.aws.crossplane.io/v1alpha3
 kind: S3Bucket
 metadata:
   name: demo-bucket
 spec:
-  name: wordpress-demo-e401ddfa-4729-4b72-bcef-94922203b547
-  predefinedACL: private
+  nameFormat: wordpress-demo-%s
   versioning: false
+  region: us-east-1
   providerRef:
-    name: demo-aws-provider
+    name: example
+  writeConnectionSecretToRef:
+    namespace: crossplane-system
+    name: demo-bucket-connection
 ---
-apiVersion: database.aws.crossplane.io/v1alpha1
+apiVersion: database.aws.crossplane.io/v1beta1
 kind: RDSInstance
 metadata:
-  name: demo-rds
+  name: demo-database-connection
 spec:
-  class: db.t2.small
-  connectionSecretRef:
-    name: demo-database-connection
+  dbInstanceClass: db.t2.small
   engine: mysql
   masterUsername: masteruser
+#  vpcSecurityGroupIds:
+#    - vpc-default-sg - default security group for your VPC
+#    - vpc-rds-sg - security group to allow RDS connection
+  allocatedStorage: 20
+  skipFinalSnapshotBeforeDeletion: true
   providerRef:
-    name: demo-aws-provider
-  securityGroups:
-#  - vpc-default-sg - default security group for your VPC
-#  - vpc-rds-sg - security group to allow RDS connection
-  size: 20
+    name: example
+  writeConnectionSecretToRef:
+    namespace: crossplane-system
+    name: demo-rds
+  reclaimPolicy: Delete
 ---
 apiVersion: extensions/v1beta1
 kind: Deployment

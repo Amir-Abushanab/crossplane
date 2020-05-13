@@ -1,104 +1,103 @@
-<p align="center"><img src="docs/media/banner.png" alt="Crossplane"></p>
+[![Build Status](https://jenkinsci.upbound.io/buildStatus/icon?job=crossplane/crossplane/build/master)](https://jenkinsci.upbound.io/blue/organizations/jenkins/crossplane%2Fcrossplane%2Fbuild/activity) [![GitHub release](https://img.shields.io/github/release/crossplane/crossplane/all.svg?style=flat-square)](https://github.com/crossplane/crossplane/releases) [![Docker Pulls](https://img.shields.io/docker/pulls/crossplane/crossplane.svg)](https://img.shields.io/docker/pulls/crossplane/crossplane.svg) [![Go Report Card](https://goreportcard.com/badge/github.com/crossplane/crossplane)](https://goreportcard.com/report/github.com/crossplane/crossplane) [![Slack](https://slack.crossplane.io/badge.svg)](https://slack.crossplane.io) [![Twitter Follow](https://img.shields.io/twitter/follow/crossplane_io.svg?style=social&label=Follow)](https://twitter.com/intent/follow?screen_name=crossplane_io&user_id=788180534543339520)
 
-[![Build Status](https://jenkinsci.upbound.io/buildStatus/icon?job=crossplane/build/master)](https://jenkinsci.upbound.io/blue/organizations/jenkins/crossplane%2Fbuild/activity)
-[![GitHub release](https://img.shields.io/github/release/crossplaneio/crossplane/all.svg?style=flat-square)](https://github.com/crossplaneio/crossplane/releases)
-[![Docker Pulls](https://img.shields.io/docker/pulls/crossplane/crossplane.svg)](https://img.shields.io/docker/pulls/crossplane/crossplane.svg)
-[![Go Report Card](https://goreportcard.com/badge/github.com/crossplaneio/crossplane)](https://goreportcard.com/report/github.com/crossplaneio/crossplane)
-[![FOSSA Status](https://app.fossa.io/api/projects/git%2Bgithub.com%2Fcrossplaneio%2Fcrossplane.svg?type=shield)](https://app.fossa.io/projects/git%2Bgithub.com%2Fcrossplaneio%2Fcrossplane?ref=badge_shield)
-[![Slack](https://slack.crossplane.io/badge.svg)](https://slack.crossplane.io)
-[![Twitter Follow](https://img.shields.io/twitter/follow/crossplane_io.svg?style=social&label=Follow)](https://twitter.com/intent/follow?screen_name=crossplane_io&user_id=788180534543339520)
+![Crossplane](docs/media/banner.png)
 
-[![Quality Gate Status](https://sonarcloud.io/api/project_badges/measure?project=crossplaneio_crossplane&metric=alert_status)](https://sonarcloud.io/dashboard?id=crossplaneio_crossplane)
-[![Coverage](https://sonarcloud.io/api/project_badges/measure?project=crossplaneio_crossplane&metric=coverage)](https://sonarcloud.io/dashboard?id=crossplaneio_crossplane)
-[![Maintainability Rating](https://sonarcloud.io/api/project_badges/measure?project=crossplaneio_crossplane&metric=sqale_rating)](https://sonarcloud.io/dashboard?id=crossplaneio_crossplane)
-[![Reliability Rating](https://sonarcloud.io/api/project_badges/measure?project=crossplaneio_crossplane&metric=reliability_rating)](https://sonarcloud.io/dashboard?id=crossplaneio_crossplane)
-[![Security Rating](https://sonarcloud.io/api/project_badges/measure?project=crossplaneio_crossplane&metric=security_rating)](https://sonarcloud.io/dashboard?id=crossplaneio_crossplane)
+Crossplane is an open source control plane that allows you to manage
+applications and infrastructure the Kubernetes way. It provides the following
+features:
 
-## Overview
+- Deployment and management of cloud provider managed services using the
+  Kubernetes API.
+- Management and scheduling of configuration data across multiple Kubernetes
+  clusters.
+- Separation of concern between infrastructure owners, application owners, and
+  developers.
+- Infrastructure agnostic packaging of applications and their dependencies.
+- Scheduling applications into different clusters, zones, and regions.
 
-Crossplane is an open source multicloud control plane. It introduces workload and resource abstractions on-top of existing managed services that enables a high degree of workload portability across cloud providers. A single crossplane enables the provisioning and full-lifecycle management of services and infrastructure across a wide range of providers, offerings, vendors, regions, and clusters. Crossplane offers a universal API for cloud computing, a workload scheduler, and a set of smart controllers that can automate work across clouds.
+Crossplane does not:
 
-<h4 align="center"><img src="docs/media/arch.png" alt="Crossplane" height="400"></h4>
+- Require that you run your workloads on Kubernetes.
+- Manage the data plane across Kubernetes clusters.
+- Manage or provision non-hosted Kubernetes clusters.
 
-Crossplane presents a declarative management style API that covers a wide range of portable abstractions including databases, message queues, buckets, data pipelines, serverless, clusters, and many more coming. It’s based on the declarative resource model of the popular [Kubernetes](https://github.com/kubernetes/kubernetes) project, and applies many of the lessons learned in container orchestration to multicloud workload and resource orchestration.
+Crossplane can be [installed](docs/getting-started/install.md) into any Kubernetes cluster, and
+is compatible with any Kubernetes-native project. It manages external services
+by installing [Custom Resource
+Definitions](https://kubernetes.io/docs/concepts/extend-kubernetes/api-extension/custom-resources/)
+(CRDs) and
+[reconciling](https://kubernetes.io/docs/concepts/architecture/controller/)
+instances of those Custom Resources. Crossplane is built to be extensible,
+meaning that anyone can add functionality for an new or existing cloud provider.
 
-Crossplane supports a clean separation of concerns between developers and administrators. Developers define workloads without having to worry about implementation details, environment constraints, and policies. Administrators can define environment specifics, and policies. The separation of concern leads to a higher degree of reusability and reduces complexity.
+Crossplane is comprised of four main components:
 
-Crossplane includes a workload scheduler that can factor a number of criteria including capabilities, availability, reliability, cost, regions, and performance while deploying workloads and their resources. The scheduler works alongside specialized resource controllers to ensure policies set by administrators are honored.
+1. **Core Crossplane**: the set of Kubernetes CRDs and controllers that manage
+   installation of `providers`, `stacks`, and `applications`, as well as the
+   scheduling of configuration data to remote Kubernetes clusters.
+2. **Providers**: the set of Kubernetes CRDs and controllers that provision and
+   manage services on cloud providers. A cloud provider is any service that
+   exposes infrastructure via an API.
+    - Examples: [Google Cloud
+      Platform](https://github.com/crossplane/provider-gcp), [Amazon Web
+      Services](https://github.com/crossplane/provider-aws),
+      [Azure](https://github.com/crossplane/provider-azure),
+      [Alibaba](https://github.com/crossplane/provider-alibaba),
+      [Github](https://github.com/crossplane/provider-github)
+3. **Stacks**: a bundled set of custom resources that together represent an
+   environment on a cloud provider. The bundle of instances can be created by a
+   single custom resource.
+   - Examples: [GCP Sample
+     Stack](https://github.com/crossplane/stack-gcp-sample), [AWS Sample
+     Stack](https://github.com/crossplane/stack-aws-sample), [Azure Sample
+     Stack](https://github.com/crossplane/stack-azure-sample)
+4. **Applications**: a deployable unit of code and configuration, which, when
+   created, may involve provisioning new services which are managed by a
+   `provider`, or consuming services created by a `stack`.
+    - Examples: [Wordpress](https://github.com/crossplane/app-wordpress)
 
-## Architecture and Vision
+The full vision and architecture of the Crossplane project is described in our
+[architecture document].
 
-The full architecture and vision of the Crossplane project is described in depth in the [architecture document](https://docs.google.com/document/d/1whncqdUeU2cATGEJhHvzXWC9xdK29Er45NJeoemxebo/edit?usp=sharing). It is the best place to learn more about how Crossplane fits into the Kubernetes ecosystem, the intended use cases, and comparisons to existing projects.
+For more information, take a look at the official Crossplane [documentation].
 
-## Getting Started and Documentation
+## Get Involved
 
-For getting started guides, installation, deployment, and administration, see our [Documentation](https://crossplane.io/docs/latest).
+* Discuss Crossplane on [Slack] or our [developer mailing list].
+* Follow us on [Twitter], or contact us via [Email].
+* Join our regular community meetings.
 
-## Contributing
-
-Crossplane is a community driven project and we welcome contributions. See [Contributing](CONTRIBUTING.md) to get started.
-
-## Report a Bug
-
-For filing bugs, suggesting improvements, or requesting new features, please open an [issue](https://github.com/crossplaneio/crossplane/issues).
-
-## Contact
-
-Please use the following to reach members of the community:
-
-- Slack: Join our [slack channel](https://slack.crossplane.io)
-- Forums: [crossplane-dev](https://groups.google.com/forum/#!forum/crossplane-dev)
-- Twitter: [@crossplane_io](https://twitter.com/crossplane_io)
-- Email: [info@crossplane.io](mailto:info@crossplane.io)
-
-## Community Meeting
-
-A regular community meeting takes place every other [Tuesday at 9:00 AM PT (Pacific Time)](https://zoom.us/j/425148449).
-Convert to your [local timezone](http://www.thetimezoneconverter.com/?t=9:00&tz=PT%20%28Pacific%20Time%29).
-
-Any changes to the meeting schedule will be added to the [agenda doc](https://docs.google.com/document/d/1q_sp2jLQsDEOX7Yug6TPOv7Fwrys6EwcF5Itxjkno7Y/edit?usp=sharing) and posted to [Slack #announcements](https://crossplane.slack.com/messages/CEFQCGW1H/) and the [crossplane-dev mailing list](https://groups.google.com/forum/#!forum/crossplane-dev).
-
-Anyone who wants to discuss the direction of the project, design and implementation reviews, or general questions with the broader community is welcome and encouraged to join.
+The Crossplane community meeting takes place every other [Monday at 10:00am
+Pacific Time]. Anyone who wants to discuss the direction of the project, design
+and implementation reviews, or raise general questions with the broader
+community is encouraged to join.
 
 * Meeting link: https://zoom.us/j/425148449
-* [Current agenda and past meeting notes](https://docs.google.com/document/d/1q_sp2jLQsDEOX7Yug6TPOv7Fwrys6EwcF5Itxjkno7Y/edit?usp=sharing)
-* [Past meeting recordings](https://www.youtube.com/playlist?list=PL510POnNVaaYYYDSICFSNWFqNbx1EMr-M)
+* [Current agenda and past meeting notes]
+* [Past meeting recordings]
 
-## Project Status
+Crossplane is a community driven project; we welcome your contribution. To file
+a bug, suggest an improvement, or request a new feature please open an [issue
+against Crossplane] or the relevant stack. Refer to our [contributing guide] for
+more information on how you can help.
 
-The project is an early preview. We realize that it's going to take a village to arrive at the vision of a multicloud control plane, and we wanted to open this up early to get your help and feedback. Please see the [Roadmap](ROADMAP.md) for details on what we are planning for future releases.
-
-### API Status
-
-Each API supported by Crossplane is assigned its own individual status to reflect the varying maturity and stability. More details about API versioning and status in Kubernetes can be found on the Kubernetes [API versioning page](https://kubernetes.io/docs/concepts/overview/kubernetes-api/#api-versioning), but the key difference between the statuses are summarized below:
-
-* **Alpha:** The API may change in incompatible ways in a later software release without notice, recommended for use only in short-lived testing clusters, due to increased risk of bugs and lack of long-term support.
-* **Beta:** Support for the overall features will not be dropped, though details may change. Support for upgrading or migrating between versions will be provided, either through automation or manual steps.
-* **Stable:** Features will appear in released software for many subsequent versions and support for upgrading between versions will be provided with software automation in the vast majority of scenarios.
-
-
-| Cloud | Name     | Details           | API Group                             | Status |
-| ----- | -------- | ----------------- | ------------------------------------- | ------ |
-| All   | Compute  | Compute services  | compute.crossplane.io/v1alpha1        | Alpha  |
-| All   | Storage  | Storage services  | storage.crossplane.io/v1alpha1        | Alpha  |
-| AWS   | Compute  | Compute services  | compute.aws.crossplane.io/v1alpha1    | Alpha  |
-| AWS   | Database | Database services | database.aws.crossplane.io/v1alpha1   | Alpha  |
-| AWS   | Storage  | Storage services  | storage.aws.crossplane.io/v1alpha1    | Alpha  |
-| Azure | Compute  | Compute services  | compute.azure.crossplane.io/v1alpha1  | Alpha  |
-| Azure | Database | Database services | database.azure.crossplane.io/v1alpha1 | Alpha  |
-| Azure | Storage  | Storage services  | storage.azure.crossplane.io/v1alpha1  | Alpha  |
-| GCP   | Compute  | Compute services  | compute.gcp.crossplane.io/v1alpha1    | Alpha  |
-| GCP   | Database | Database services | database.gcp.crossplane.io/v1alpha1   | Alpha  |
-| GCP   | Storage  | Storage services  | storage.gcp.crossplane.io/v1alpha1    | Alpha  |
-
-### Official Releases
-
-Official releases of Crossplane can be found on the [releases page](https://github.com/crossplaneio/crossplane/releases).
-Please note that it is **strongly recommended** that you use [official releases](https://github.com/crossplaneio/crossplane/releases) of Crossplane, as unreleased versions from the master branch are subject to changes and incompatibilities that will not be supported in the official releases.
-Builds from the master branch can have functionality changed and even removed at any time without compatibility support and without prior notice.
-
-## Licensing
+## License
 
 Crossplane is under the Apache 2.0 license.
 
-[![FOSSA Status](https://app.fossa.io/api/projects/git%2Bgithub.com%2Fcrossplaneio%2Fcrossplane.svg?type=large)](https://app.fossa.io/projects/git%2Bgithub.com%2Fcrossplaneio%2Fcrossplane?ref=badge_large)
+[![FOSSA Status](https://app.fossa.io/api/projects/git%2Bgithub.com%2Fcrossplane%2Fcrossplane.svg?type=large)](https://app.fossa.io/projects/git%2Bgithub.com%2Fcrossplane%2Fcrossplane?ref=badge_large)
+
+<!-- Named links -->
+
+[Crossplane]: https://crossplane.io
+[documentation]: https://crossplane.io/docs/latest
+[architecture document]: https://docs.google.com/document/d/1whncqdUeU2cATGEJhHvzXWC9xdK29Er45NJeoemxebo/edit?usp=sharing
+[Slack]: https://slack.crossplane.io
+[developer mailing list]: https://groups.google.com/forum/#!forum/crossplane-dev
+[Twitter]: https://twitter.com/crossplane_io
+[Email]: mailto:info@crossplane.io
+[issue against Crossplane]: https://github.com/crossplane/crossplane/issues
+[contributing guide]: CONTRIBUTING.md
+[Monday at 10:00am Pacific Time]: https://www.thetimezoneconverter.com/?t=10:00&tz=PT%20%28Pacific%20Time%29
+[Current agenda and past meeting notes]: https://docs.google.com/document/d/1q_sp2jLQsDEOX7Yug6TPOv7Fwrys6EwcF5Itxjkno7Y/edit?usp=sharing
+[Past meeting recordings]: https://www.youtube.com/playlist?list=PL510POnNVaaYYYDSICFSNWFqNbx1EMr-M

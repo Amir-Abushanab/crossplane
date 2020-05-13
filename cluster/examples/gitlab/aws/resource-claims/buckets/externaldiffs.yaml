@@ -3,9 +3,9 @@ apiVersion: storage.crossplane.io/v1alpha1
 kind: Bucket
 metadata:
   name: gitlab-externaldiffs
-  namespace: default
 spec:
-  classReference:
-    name: standard-aws-bucket
-    namespace: crossplane-system
-  name: gitlab-demo-externaldiffs-%s
+  classSelector:
+    matchLabels:
+      example: "true"
+  writeConnectionSecretToRef:
+    name: gitlab-externaldiffs

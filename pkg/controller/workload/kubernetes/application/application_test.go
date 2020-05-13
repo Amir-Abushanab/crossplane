@@ -1,5 +1,5 @@
 /*
-Copyright 2018 The Crossplane Authors.
+Copyright 2019 The Crossplane Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -19,6 +19,7 @@ package application
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/google/go-cmp/cmp"
 	"github.com/pkg/errors"
@@ -32,11 +33,11 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	computev1alpha1 "github.com/crossplaneio/crossplane/pkg/apis/compute/v1alpha1"
-	corev1alpha1 "github.com/crossplaneio/crossplane/pkg/apis/core/v1alpha1"
-	"github.com/crossplaneio/crossplane/pkg/apis/workload/v1alpha1"
-	"github.com/crossplaneio/crossplane/pkg/controller/core"
-	"github.com/crossplaneio/crossplane/pkg/test"
+	runtimev1alpha1 "github.com/crossplane/crossplane-runtime/apis/core/v1alpha1"
+	"github.com/crossplane/crossplane-runtime/pkg/logging"
+	"github.com/crossplane/crossplane-runtime/pkg/meta"
+	"github.com/crossplane/crossplane-runtime/pkg/test"
+	"github.com/crossplane/crossplane/apis/workload/v1alpha1"
 )
 
 const (
@@ -46,13 +47,14 @@ const (
 )
 
 var (
-	errorBoom = errors.New("boom")
-	meta      = metav1.ObjectMeta{Namespace: namespace, Name: name, UID: uid}
-	ctx       = context.Background()
+	errorBoom  = errors.New("boom")
+	objectMeta = metav1.ObjectMeta{Namespace: namespace, Name: name, UID: uid}
+	ctx        = context.Background()
 
 	templateA = v1alpha1.KubernetesApplicationResourceTemplate{
 		ObjectMeta: metav1.ObjectMeta{Namespace: namespace, Name: "coolTemplateA"},
 		Spec: v1alpha1.KubernetesApplicationResourceSpec{
+			Target:  targetRef,
 			Secrets: []corev1.LocalObjectReference{{Name: "coolSecretA"}},
 		},
 	}
@@ -63,38 +65,51 @@ var (
 		},
 	}
 
-	resourceA = &v1alpha1.KubernetesApplicationResource{
+	target = &v1alpha1.KubernetesTarget{
+		ObjectMeta: metav1.ObjectMeta{Namespace: namespace, Name: "coolTarget"},
+	}
+
+	targetRef = &v1alpha1.KubernetesTargetReference{Name: target.GetName()}
+)
+
+type karModifier func(*v1alpha1.KubernetesApplicationResource)
+
+func karWithState(s v1alpha1.KubernetesApplicationResourceState) karModifier {
+	return func(r *v1alpha1.KubernetesApplicationResource) { r.Status.State = s }
+}
+
+func kar(rm ...karModifier) *v1alpha1.KubernetesApplicationResource {
+	k := &v1alpha1.KubernetesApplicationResource{
 		ObjectMeta: metav1.ObjectMeta{
-			Namespace:   meta.GetNamespace(),
+			Namespace:   objectMeta.GetNamespace(),
 			Name:        templateA.GetName(),
 			Labels:      templateA.GetLabels(),
 			Annotations: templateA.GetAnnotations(),
 			OwnerReferences: []metav1.OwnerReference{
-				*(metav1.NewControllerRef(kubeApp(), v1alpha1.KubernetesApplicationGroupVersionKind)),
+				*(metav1.NewControllerRef(kubeApp(withUID(uid)), v1alpha1.KubernetesApplicationGroupVersionKind)),
 			},
 		},
 		Spec: templateA.Spec,
 		Status: v1alpha1.KubernetesApplicationResourceStatus{
-			State:   v1alpha1.KubernetesApplicationResourceStateScheduled,
-			Cluster: cluster.ObjectReference(),
+			State: v1alpha1.KubernetesApplicationResourceStateScheduled,
 		},
 	}
 
-	cluster = &computev1alpha1.KubernetesCluster{
-		ObjectMeta: metav1.ObjectMeta{Namespace: namespace, Name: "coolCluster"},
+	for _, m := range rm {
+		m(k)
 	}
-)
 
-// Frequently used conditions.
-var (
-	ready   = corev1alpha1.DeprecatedCondition{Type: corev1alpha1.DeprecatedReady, Status: corev1.ConditionTrue}
-	pending = corev1alpha1.DeprecatedCondition{Type: corev1alpha1.DeprecatedPending, Status: corev1.ConditionTrue}
-)
+	return k
+}
 
 type kubeAppModifier func(*v1alpha1.KubernetesApplication)
 
-func withConditions(c ...corev1alpha1.DeprecatedCondition) kubeAppModifier {
-	return func(r *v1alpha1.KubernetesApplication) { r.Status.DeprecatedConditionedStatus.Conditions = c }
+func withConditions(c ...runtimev1alpha1.Condition) kubeAppModifier {
+	return func(r *v1alpha1.KubernetesApplication) { r.Status.SetConditions(c...) }
+}
+
+func withDeletionTimestamp(t *metav1.Time) kubeAppModifier {
+	return func(r *v1alpha1.KubernetesApplication) { r.DeletionTimestamp = t }
 }
 
 func withState(s v1alpha1.KubernetesApplicationState) kubeAppModifier {
@@ -109,9 +124,15 @@ func withSubmittedResources(i int) kubeAppModifier {
 	return func(r *v1alpha1.KubernetesApplication) { r.Status.SubmittedResources = i }
 }
 
-func withCluster(c *corev1.ObjectReference) kubeAppModifier {
+func withTarget(name string) kubeAppModifier {
 	return func(r *v1alpha1.KubernetesApplication) {
-		r.Status.Cluster = c
+		r.Spec.Target = &v1alpha1.KubernetesTargetReference{Name: name}
+	}
+}
+
+func withUID(u types.UID) kubeAppModifier {
+	return func(r *v1alpha1.KubernetesApplication) {
+		r.UID = u
 	}
 }
 
@@ -122,7 +143,7 @@ func withTemplates(t ...v1alpha1.KubernetesApplicationResourceTemplate) kubeAppM
 }
 
 func kubeApp(rm ...kubeAppModifier) *v1alpha1.KubernetesApplication {
-	r := &v1alpha1.KubernetesApplication{ObjectMeta: meta}
+	r := &v1alpha1.KubernetesApplication{ObjectMeta: objectMeta}
 
 	for _, m := range rm {
 		m(r)
@@ -141,8 +162,8 @@ func TestCreatePredicate(t *testing.T) {
 			name: "ScheduledCluster",
 			event: event.CreateEvent{
 				Object: &v1alpha1.KubernetesApplication{
-					Status: v1alpha1.KubernetesApplicationStatus{
-						Cluster: cluster.ObjectReference(),
+					Spec: v1alpha1.KubernetesApplicationSpec{
+						Target: targetRef,
 					},
 				},
 			},
@@ -183,8 +204,8 @@ func TestUpdatePredicate(t *testing.T) {
 			name: "ScheduledCluster",
 			event: event.UpdateEvent{
 				ObjectNew: &v1alpha1.KubernetesApplication{
-					Status: v1alpha1.KubernetesApplicationStatus{
-						Cluster: cluster.ObjectReference(),
+					Spec: v1alpha1.KubernetesApplicationSpec{
+						Target: targetRef,
 					},
 				},
 			},
@@ -248,11 +269,11 @@ func (gc *mockGarbageCollector) process(ctx context.Context, app *v1alpha1.Kuber
 
 func TestSync(t *testing.T) {
 	cases := []struct {
-		name       string
-		syncer     syncer
-		app        *v1alpha1.KubernetesApplication
-		wantApp    *v1alpha1.KubernetesApplication
-		wantResult reconcile.Result
+		name      string
+		syncer    syncer
+		app       *v1alpha1.KubernetesApplication
+		wantState v1alpha1.KubernetesApplicationState
+		wantErr   error
 	}{
 		{
 			name: "NoResourcesSubmitted",
@@ -260,15 +281,8 @@ func TestSync(t *testing.T) {
 				ar: &mockARSyncer{mockSync: newMockARSyncFn(false, nil)},
 				gc: &mockGarbageCollector{mockProcess: newMockProcessFn(nil)},
 			},
-			app: kubeApp(withTemplates(templateA)),
-			wantApp: kubeApp(
-				withTemplates(templateA),
-				withState(v1alpha1.KubernetesApplicationStateScheduled),
-				withConditions(pending),
-				withDesiredResources(1),
-				withSubmittedResources(0),
-			),
-			wantResult: reconcile.Result{RequeueAfter: core.RequeueOnWait},
+			app:       kubeApp(withTemplates(templateA)),
+			wantState: v1alpha1.KubernetesApplicationStateScheduled,
 		},
 		{
 			name: "PartialResourcesSubmitted",
@@ -286,15 +300,8 @@ func TestSync(t *testing.T) {
 				},
 				gc: &mockGarbageCollector{mockProcess: newMockProcessFn(nil)},
 			},
-			app: kubeApp(withTemplates(templateA, templateB)),
-			wantApp: kubeApp(
-				withTemplates(templateA, templateB),
-				withState(v1alpha1.KubernetesApplicationStatePartial),
-				withConditions(pending),
-				withDesiredResources(2),
-				withSubmittedResources(1),
-			),
-			wantResult: reconcile.Result{RequeueAfter: core.RequeueOnWait},
+			app:       kubeApp(withTemplates(templateA, templateB)),
+			wantState: v1alpha1.KubernetesApplicationStatePartial,
 		},
 		{
 			name: "AllResourcesSubmitted",
@@ -307,15 +314,8 @@ func TestSync(t *testing.T) {
 				},
 				gc: &mockGarbageCollector{mockProcess: newMockProcessFn(nil)},
 			},
-			app: kubeApp(withTemplates(templateA, templateB)),
-			wantApp: kubeApp(
-				withTemplates(templateA, templateB),
-				withState(v1alpha1.KubernetesApplicationStateSubmitted),
-				withConditions(ready),
-				withDesiredResources(2),
-				withSubmittedResources(2),
-			),
-			wantResult: reconcile.Result{Requeue: false},
+			app:       kubeApp(withTemplates(templateA, templateB)),
+			wantState: v1alpha1.KubernetesApplicationStateSubmitted,
 		},
 		{
 			name: "GarbageCollectionFailed",
@@ -323,76 +323,96 @@ func TestSync(t *testing.T) {
 				ar: &mockARSyncer{mockSync: newMockARSyncFn(false, nil)},
 				gc: &mockGarbageCollector{mockProcess: newMockProcessFn(errorBoom)},
 			},
-			app: kubeApp(withTemplates(templateA)),
-			wantApp: kubeApp(
-				withTemplates(templateA),
-				withState(v1alpha1.KubernetesApplicationStateFailed),
-				withConditions(
-					corev1alpha1.DeprecatedCondition{
-						Type:    corev1alpha1.DeprecatedFailed,
-						Status:  corev1.ConditionTrue,
-						Reason:  reasonGCResources,
-						Message: errorBoom.Error(),
-					},
-				),
-				withDesiredResources(1),
-			),
-			wantResult: reconcile.Result{Requeue: true},
+			app:       kubeApp(withTemplates(templateA)),
+			wantState: v1alpha1.KubernetesApplicationStateFailed,
+			wantErr:   errors.Wrap(errorBoom, errGarbageCollect),
 		},
 		{
-			name: "SyncApplicationResourceFailed",
+			name: "SyncApplicationResourceFailedSingle",
 			syncer: &localCluster{
 				ar: &mockARSyncer{mockSync: newMockARSyncFn(false, errorBoom)},
 				gc: &mockGarbageCollector{mockProcess: newMockProcessFn(nil)},
 			},
-			app: kubeApp(withTemplates(templateA)),
-			wantApp: kubeApp(
-				withTemplates(templateA),
-				withState(v1alpha1.KubernetesApplicationStateFailed),
-				withConditions(
-					corev1alpha1.DeprecatedCondition{
-						Type:    corev1alpha1.DeprecatedFailed,
-						Status:  corev1.ConditionTrue,
-						Reason:  reasonSyncingResource,
-						Message: errorBoom.Error(),
-					},
-				),
-				withDesiredResources(1),
-			),
-			wantResult: reconcile.Result{Requeue: true},
+			app:       kubeApp(withTemplates(templateA)),
+			wantState: v1alpha1.KubernetesApplicationStateFailed,
+			wantErr:   errors.Wrap(condenseErrors([]error{errorBoom}), errSyncTemplate),
+		},
+		{
+			name: "SyncApplicationResourceFailedMultiple",
+			syncer: &localCluster{
+				ar: &mockARSyncer{mockSync: newMockARSyncFn(false, errorBoom)},
+				gc: &mockGarbageCollector{mockProcess: newMockProcessFn(nil)},
+			},
+			app:       kubeApp(withTemplates(templateA, templateB)),
+			wantState: v1alpha1.KubernetesApplicationStateFailed,
+			wantErr:   errors.Wrap(condenseErrors([]error{errorBoom, errorBoom}), errSyncTemplate),
+		},
+		{
+			name: "SyncApplicationResourceFailedPartial",
+			syncer: &localCluster{
+				ar: &mockARSyncer{mockSync: func(_ context.Context, r *v1alpha1.KubernetesApplicationResource) (bool, error) {
+					if r.Name == "coolTemplateA" {
+						return false, errorBoom
+					}
+					return true, nil
+				}},
+				gc: &mockGarbageCollector{mockProcess: newMockProcessFn(nil)},
+			},
+			app:       kubeApp(withTemplates(templateA, templateB)),
+			wantState: v1alpha1.KubernetesApplicationStatePartial,
+			wantErr:   errors.Wrap(condenseErrors([]error{errorBoom}), errSyncTemplate),
+		},
+		{
+			name: "ApplicationDeletedDoNotSync",
+			syncer: &localCluster{
+				ar: &mockARSyncer{mockSync: newMockARSyncFn(false, errorBoom)},
+				gc: &mockGarbageCollector{mockProcess: newMockProcessFn(nil)},
+			},
+			app:       kubeApp(withDeletionTimestamp(&metav1.Time{Time: time.Now()})),
+			wantState: v1alpha1.KubernetesApplicationStateDeleted,
 		},
 	}
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			gotResult := tc.syncer.sync(ctx, tc.app)
+			gotState, gotErr := tc.syncer.sync(ctx, tc.app)
 
-			if diff := cmp.Diff(tc.wantResult, gotResult); diff != "" {
-				t.Errorf("tc.sd.Sync(...): want != got:\n%s", diff)
+			if diff := cmp.Diff(tc.wantErr, gotErr, test.EquateErrors()); diff != "" {
+				t.Errorf("tc.sd.Sync(...): -want, +got:\n%s", diff)
 			}
 
-			if diff := cmp.Diff(tc.wantApp, tc.app); diff != "" {
-				t.Errorf("app: want != got:\n%s", diff)
+			if diff := cmp.Diff(tc.wantState, gotState); diff != "" {
+				t.Errorf("tc.sd.Sync(...): -want, +got:\n%s", diff)
 			}
 		})
 	}
 }
 
-type mockSyncFn func(ctx context.Context, app *v1alpha1.KubernetesApplication) reconcile.Result
+type mockSyncFn func(ctx context.Context, app *v1alpha1.KubernetesApplication) (v1alpha1.KubernetesApplicationState, error)
 
-func newMockSyncFn(r reconcile.Result) mockSyncFn {
-	return func(_ context.Context, _ *v1alpha1.KubernetesApplication) reconcile.Result { return r }
+func newMockSyncFn(s v1alpha1.KubernetesApplicationState, submit bool, e error) mockSyncFn {
+	return func(_ context.Context, a *v1alpha1.KubernetesApplication) (v1alpha1.KubernetesApplicationState, error) {
+		if meta.WasDeleted(a) {
+			return v1alpha1.KubernetesApplicationStateDeleted, e
+		}
+		if submit {
+			a.Status.SubmittedResources = a.Status.DesiredResources
+		}
+		return s, e
+	}
 }
 
 type mockSyncer struct {
 	mockSync mockSyncFn
 }
 
-func (sd *mockSyncer) sync(ctx context.Context, app *v1alpha1.KubernetesApplication) reconcile.Result {
+func (sd *mockSyncer) sync(ctx context.Context, app *v1alpha1.KubernetesApplication) (v1alpha1.KubernetesApplicationState, error) {
 	return sd.mockSync(ctx, app)
 }
 
 func TestReconcile(t *testing.T) {
+	delTime := time.Now()
+
 	cases := []struct {
 		name       string
 		rec        *Reconciler
@@ -408,6 +428,7 @@ func TestReconcile(t *testing.T) {
 						return kerrors.NewNotFound(schema.GroupResource{}, name)
 					},
 				},
+				log: logging.NewNopLogger(),
 			},
 			req:        reconcile.Request{NamespacedName: types.NamespacedName{Namespace: namespace, Name: name}},
 			wantResult: reconcile.Result{Requeue: false},
@@ -417,6 +438,7 @@ func TestReconcile(t *testing.T) {
 			name: "FailedToGetExtantKubernetesApplication",
 			rec: &Reconciler{
 				kube: &test.MockClient{MockGet: test.NewMockGetFn(errorBoom)},
+				log:  logging.NewNopLogger(),
 			},
 			req:        reconcile.Request{NamespacedName: types.NamespacedName{Namespace: namespace, Name: name}},
 			wantResult: reconcile.Result{Requeue: false},
@@ -425,21 +447,79 @@ func TestReconcile(t *testing.T) {
 		{
 			name: "ApplicationSyncedSuccessfully",
 			rec: &Reconciler{
-				kube:  &test.MockClient{MockGet: test.NewMockGetFn(nil), MockUpdate: test.NewMockUpdateFn(nil)},
-				local: &mockSyncer{mockSync: newMockSyncFn(reconcile.Result{Requeue: false})},
+				kube: &test.MockClient{
+					MockGet: func(_ context.Context, key client.ObjectKey, obj runtime.Object) error {
+						*obj.(*v1alpha1.KubernetesApplication) = *(kubeApp(withDesiredResources(3)))
+						return nil
+					},
+					MockStatusUpdate: func(_ context.Context, obj runtime.Object, _ ...client.UpdateOption) error {
+						got := obj.(*v1alpha1.KubernetesApplication)
+
+						want := kubeApp(
+							withConditions(runtimev1alpha1.ReconcileSuccess()),
+							withState(v1alpha1.KubernetesApplicationStateSubmitted),
+							withDesiredResources(3),
+							withSubmittedResources(3),
+						)
+
+						if diff := cmp.Diff(want, got); diff != "" {
+							return errors.Errorf("MockUpdate: -want, +got: %s", diff)
+						}
+
+						return nil
+					},
+				},
+				local: &mockSyncer{mockSync: newMockSyncFn(v1alpha1.KubernetesApplicationStateSubmitted, true, nil)},
+				log:   logging.NewNopLogger(),
 			},
 			req:        reconcile.Request{NamespacedName: types.NamespacedName{Namespace: namespace, Name: name}},
-			wantResult: reconcile.Result{Requeue: false},
+			wantResult: reconcile.Result{RequeueAfter: longWait},
+		},
+		{
+			name: "ApplicationDeletedDoNotSync",
+			rec: &Reconciler{
+				kube: &test.MockClient{
+					MockGet: func(_ context.Context, key client.ObjectKey, obj runtime.Object) error {
+						*obj.(*v1alpha1.KubernetesApplication) = *(kubeApp(
+							withDesiredResources(3),
+							withState(v1alpha1.KubernetesApplicationStateSubmitted),
+							withDeletionTimestamp(&metav1.Time{Time: delTime}),
+						))
+						return nil
+					},
+					MockStatusUpdate: func(_ context.Context, obj runtime.Object, _ ...client.UpdateOption) error {
+						got := obj.(*v1alpha1.KubernetesApplication)
+
+						want := kubeApp(
+							withConditions(runtimev1alpha1.ReconcileSuccess()),
+							withDeletionTimestamp(&metav1.Time{Time: delTime}),
+							withState(v1alpha1.KubernetesApplicationStateDeleted),
+							withDesiredResources(3),
+						)
+
+						if diff := cmp.Diff(want, got); diff != "" {
+							return errors.Errorf("MockUpdate: -want, +got: %s", diff)
+						}
+
+						return nil
+					},
+				},
+				local: &mockSyncer{mockSync: newMockSyncFn(v1alpha1.KubernetesApplicationStateDeleted, true, nil)},
+				log:   logging.NewNopLogger(),
+			},
+			req:        reconcile.Request{NamespacedName: types.NamespacedName{Namespace: namespace, Name: name}},
+			wantResult: reconcile.Result{RequeueAfter: longWait},
 		},
 		{
 			name: "ApplicationSyncFailure",
 			rec: &Reconciler{
-				kube:  &test.MockClient{MockGet: test.NewMockGetFn(nil), MockUpdate: test.NewMockUpdateFn(errorBoom)},
-				local: &mockSyncer{mockSync: newMockSyncFn(reconcile.Result{Requeue: false})},
+				kube:  &test.MockClient{MockGet: test.NewMockGetFn(nil), MockStatusUpdate: test.NewMockStatusUpdateFn(errorBoom)},
+				local: &mockSyncer{mockSync: newMockSyncFn(v1alpha1.KubernetesApplicationStateFailed, false, errorBoom)},
+				log:   logging.NewNopLogger(),
 			},
 			req:        reconcile.Request{NamespacedName: types.NamespacedName{Namespace: namespace, Name: name}},
-			wantResult: reconcile.Result{Requeue: false},
-			wantErr:    errors.Wrapf(errorBoom, "cannot update %s %s/%s", v1alpha1.KubernetesApplicationKind, namespace, name),
+			wantResult: reconcile.Result{RequeueAfter: shortWait},
+			wantErr:    errors.Wrapf(errorBoom, "cannot update status %s %s/%s", v1alpha1.KubernetesApplicationKind, namespace, name),
 		},
 	}
 
@@ -452,7 +532,7 @@ func TestReconcile(t *testing.T) {
 			}
 
 			if diff := cmp.Diff(tc.wantResult, gotResult); diff != "" {
-				t.Errorf("tc.rec.Reconcile(...): want != got:\n%s", diff)
+				t.Errorf("tc.rec.Reconcile(...): -want, +got:\n%s", diff)
 			}
 		})
 	}
@@ -470,9 +550,9 @@ func TestGarbageCollect(t *testing.T) {
 			name: "SuccessfulResourceDeletion",
 			gc: &applicationResourceGarbageCollector{
 				kube: &test.MockClient{
-					MockList: func(_ context.Context, _ *client.ListOptions, obj runtime.Object) error {
+					MockList: func(_ context.Context, obj runtime.Object, _ ...client.ListOption) error {
 						ref := metav1.NewControllerRef(kubeApp(), v1alpha1.KubernetesApplicationGroupVersionKind)
-						m := meta.DeepCopy()
+						m := objectMeta.DeepCopy()
 						m.SetOwnerReferences([]metav1.OwnerReference{*ref})
 						*obj.(*v1alpha1.KubernetesApplicationResourceList) = v1alpha1.KubernetesApplicationResourceList{
 							Items: []v1alpha1.KubernetesApplicationResource{{ObjectMeta: *m}},
@@ -489,9 +569,9 @@ func TestGarbageCollect(t *testing.T) {
 			name: "FailedResourceDeletion",
 			gc: &applicationResourceGarbageCollector{
 				kube: &test.MockClient{
-					MockList: func(_ context.Context, _ *client.ListOptions, obj runtime.Object) error {
+					MockList: func(_ context.Context, obj runtime.Object, _ ...client.ListOption) error {
 						ref := metav1.NewControllerRef(kubeApp(), v1alpha1.KubernetesApplicationGroupVersionKind)
-						m := meta.DeepCopy()
+						m := objectMeta.DeepCopy()
 						m.SetOwnerReferences([]metav1.OwnerReference{*ref})
 						*obj.(*v1alpha1.KubernetesApplicationResourceList) = v1alpha1.KubernetesApplicationResourceList{
 							Items: []v1alpha1.KubernetesApplicationResource{{ObjectMeta: *m}},
@@ -504,14 +584,7 @@ func TestGarbageCollect(t *testing.T) {
 			app: kubeApp(withTemplates(templateA)),
 			wantApp: kubeApp(
 				withTemplates(templateA),
-				withConditions(
-					corev1alpha1.DeprecatedCondition{
-						Type:    corev1alpha1.DeprecatedFailed,
-						Status:  corev1.ConditionTrue,
-						Reason:  reasonGCResources,
-						Message: errorBoom.Error(),
-					},
-				),
+				withConditions(runtimev1alpha1.ReconcileError(errorBoom)),
 			),
 		},
 		{
@@ -527,9 +600,9 @@ func TestGarbageCollect(t *testing.T) {
 			name: "ResourceNotControlledByApplication",
 			gc: &applicationResourceGarbageCollector{
 				kube: &test.MockClient{
-					MockList: func(_ context.Context, _ *client.ListOptions, obj runtime.Object) error {
+					MockList: func(_ context.Context, obj runtime.Object, _ ...client.ListOption) error {
 						*obj.(*v1alpha1.KubernetesApplicationResourceList) = v1alpha1.KubernetesApplicationResourceList{
-							Items: []v1alpha1.KubernetesApplicationResource{{ObjectMeta: meta}},
+							Items: []v1alpha1.KubernetesApplicationResource{{ObjectMeta: objectMeta}},
 						}
 						return nil
 					},
@@ -542,7 +615,7 @@ func TestGarbageCollect(t *testing.T) {
 			name: "ResourceIsTemplated",
 			gc: &applicationResourceGarbageCollector{
 				kube: &test.MockClient{
-					MockList: func(_ context.Context, _ *client.ListOptions, obj runtime.Object) error {
+					MockList: func(_ context.Context, obj runtime.Object, _ ...client.ListOption) error {
 						ref := metav1.NewControllerRef(kubeApp(), v1alpha1.KubernetesApplicationGroupVersionKind)
 						m := templateA.ObjectMeta.DeepCopy()
 						m.SetOwnerReferences([]metav1.OwnerReference{*ref})
@@ -567,7 +640,7 @@ func TestGarbageCollect(t *testing.T) {
 			}
 
 			if diff := cmp.Diff(tc.wantApp, tc.app); diff != "" {
-				t.Errorf("app: want != got:\n%s", diff)
+				t.Errorf("app: -want, +got:\n%s", diff)
 			}
 		})
 	}
@@ -586,38 +659,39 @@ func TestSyncApplicationResource(t *testing.T) {
 			ar: &applicationResourceClient{
 				kube: &test.MockClient{
 					MockGet: func(_ context.Context, _ types.NamespacedName, obj runtime.Object) error {
-						r := resourceA.DeepCopy()
-						r.Status.State = v1alpha1.KubernetesApplicationResourceStateSubmitted
-
-						*obj.(*v1alpha1.KubernetesApplicationResource) = *r
-						return nil
-					},
-				},
-			},
-			template:      resourceA,
-			wantSubmitted: true,
-		},
-		{
-			name: "ExistingResourceHasDifferentController",
-			ar: &applicationResourceClient{
-				kube: &test.MockClient{
-					MockGet: func(_ context.Context, _ types.NamespacedName, obj runtime.Object) error {
-						r := resourceA.DeepCopy()
+						r := kar(karWithState(v1alpha1.KubernetesApplicationResourceStateSubmitted))
 						r.SetOwnerReferences([]metav1.OwnerReference{})
 
 						*obj.(*v1alpha1.KubernetesApplicationResource) = *r
 						return nil
 					},
+					MockUpdate: test.NewMockUpdateFn(nil),
 				},
 			},
-			template: resourceA,
-			wantErr: errors.WithStack(errors.Errorf("cannot sync %s: could not mutate object for update: %s %s exists and is not controlled by %s %s",
-				v1alpha1.KubernetesApplicationResourceKind,
-				v1alpha1.KubernetesApplicationResourceKind,
-				templateA.GetName(),
-				v1alpha1.KubernetesApplicationKind,
-				meta.GetName(),
-			)),
+			template:      kar(),
+			wantSubmitted: true,
+		},
+		{
+			name: "ExistingResourceIsNotControllable",
+			ar: &applicationResourceClient{
+				kube: &test.MockClient{
+					MockGet: func(_ context.Context, _ types.NamespacedName, obj runtime.Object) error {
+						r := kar()
+						truePtr := true
+						r.SetOwnerReferences([]metav1.OwnerReference{
+							{
+								Controller: &truePtr,
+								UID:        types.UID("some-other-uid"),
+							},
+						})
+
+						*obj.(*v1alpha1.KubernetesApplicationResource) = *r
+						return nil
+					},
+				},
+			},
+			template: kar(),
+			wantErr:  errors.WithStack(errors.Errorf("cannot sync %s: existing object is not controlled by UID \"%s\"", v1alpha1.KubernetesApplicationResourceKind, uid)),
 		},
 		{
 
@@ -625,8 +699,8 @@ func TestSyncApplicationResource(t *testing.T) {
 			ar: &applicationResourceClient{
 				kube: &test.MockClient{MockGet: test.NewMockGetFn(errorBoom)},
 			},
-			template: resourceA,
-			wantErr:  errors.Wrapf(errorBoom, "cannot sync %s: could not get object", v1alpha1.KubernetesApplicationResourceKind),
+			template: kar(),
+			wantErr:  errors.Wrapf(errorBoom, "cannot sync %s: cannot get object", v1alpha1.KubernetesApplicationResourceKind),
 		},
 	}
 
@@ -639,7 +713,7 @@ func TestSyncApplicationResource(t *testing.T) {
 			}
 
 			if diff := cmp.Diff(tc.wantSubmitted, gotSubmitted); diff != "" {
-				t.Errorf("tc.ar.Sync(...): want != got:\n%s", diff)
+				t.Errorf("tc.ar.Sync(...): -want, +got:\n%s", diff)
 			}
 		})
 	}
@@ -654,9 +728,9 @@ func TestRenderTemplate(t *testing.T) {
 	}{
 		{
 			name:     "Successful",
-			app:      kubeApp(withCluster(cluster.ObjectReference())),
+			app:      kubeApp(withTarget(target.GetName())),
 			template: &templateA,
-			want:     resourceA,
+			want:     kar(),
 		},
 	}
 
@@ -665,93 +739,7 @@ func TestRenderTemplate(t *testing.T) {
 			got := renderTemplate(tc.app, tc.template)
 
 			if diff := cmp.Diff(tc.want, got); diff != "" {
-				t.Errorf("renderTemplate(...): want != got:\n%s", diff)
-			}
-		})
-	}
-}
-
-func TestHasSameController(t *testing.T) {
-	cases := []struct {
-		name string
-		a    metav1.Object
-		b    metav1.Object
-		want bool
-	}{
-		{
-			name: "SameController",
-			a: &v1alpha1.KubernetesApplicationResource{
-				ObjectMeta: metav1.ObjectMeta{
-					OwnerReferences: []metav1.OwnerReference{
-						*(metav1.NewControllerRef(kubeApp(), v1alpha1.KubernetesApplicationGroupVersionKind)),
-					},
-				},
-			},
-			b: &v1alpha1.KubernetesApplicationResource{
-				ObjectMeta: metav1.ObjectMeta{
-					OwnerReferences: []metav1.OwnerReference{
-						*(metav1.NewControllerRef(kubeApp(), v1alpha1.KubernetesApplicationGroupVersionKind)),
-					},
-				},
-			},
-			want: true,
-		},
-		{
-			name: "AHasNoController",
-			a:    &v1alpha1.KubernetesApplicationResource{},
-			b: &v1alpha1.KubernetesApplicationResource{
-				ObjectMeta: metav1.ObjectMeta{
-					OwnerReferences: []metav1.OwnerReference{
-						*(metav1.NewControllerRef(kubeApp(), v1alpha1.KubernetesApplicationGroupVersionKind)),
-					},
-				},
-			},
-			want: false,
-		},
-		{
-			name: "BHasNoController",
-			a: &v1alpha1.KubernetesApplicationResource{
-				ObjectMeta: metav1.ObjectMeta{
-					OwnerReferences: []metav1.OwnerReference{
-						*(metav1.NewControllerRef(kubeApp(), v1alpha1.KubernetesApplicationGroupVersionKind)),
-					},
-				},
-			},
-			b:    &v1alpha1.KubernetesApplicationResource{},
-			want: false,
-		},
-		{
-			name: "ControllersDiffer",
-			a: &v1alpha1.KubernetesApplicationResource{
-				ObjectMeta: metav1.ObjectMeta{
-					OwnerReferences: []metav1.OwnerReference{
-						{
-							Controller: func() *bool {
-								t := true
-								return &t
-							}(),
-							UID: "imdifferent",
-						},
-					},
-				},
-			},
-			b: &v1alpha1.KubernetesApplicationResource{
-				ObjectMeta: metav1.ObjectMeta{
-					OwnerReferences: []metav1.OwnerReference{
-						*(metav1.NewControllerRef(kubeApp(), v1alpha1.KubernetesApplicationGroupVersionKind)),
-					},
-				},
-			},
-			want: false,
-		},
-	}
-
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			got := hasSameController(tc.a, tc.b)
-
-			if diff := cmp.Diff(tc.want, got); diff != "" {
-				t.Errorf("hasSameController(...): want != got:\n%s", diff)
+				t.Errorf("renderTemplate(...): -want, +got:\n%s", diff)
 			}
 		})
 	}
@@ -772,7 +760,7 @@ func TestGetControllerName(t *testing.T) {
 					},
 				},
 			},
-			want: meta.GetName(),
+			want: objectMeta.GetName(),
 		},
 		{
 			name: "HasNoController",
@@ -786,7 +774,7 @@ func TestGetControllerName(t *testing.T) {
 			got := getControllerName(tc.obj)
 
 			if diff := cmp.Diff(tc.want, got); diff != "" {
-				t.Errorf("getControllerName(...): want != got:\n%s", diff)
+				t.Errorf("getControllerName(...): -want, +got:\n%s", diff)
 			}
 		})
 	}

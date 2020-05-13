@@ -1,0 +1,7 @@
+resources:
+  - gkeclass.yaml
+  - yugabyteclass.yaml
+  - k8sclaim.yaml
+  - rook-operator.yaml
+  - yugastore.yaml
+  - yugabyteclaim.yaml

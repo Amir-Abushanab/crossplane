@@ -1,0 +1,16 @@
+---
+apiVersion: database.azure.crossplane.io/v1alpha3
+kind: MySQLServerVirtualNetworkRule
+metadata:
+  name: sample-vnet-rule3
+spec:
+  name: my-cool-vnet-rule
+  serverName: MYSQL_NAME
+  resourceGroupNameRef:
+    name: sample-rg
+  properties:
+    virtualNetworkSubnetIdRef:
+      name: sample-subnet
+  reclaimPolicy: Delete
+  providerRef:
+    name: azure-provider

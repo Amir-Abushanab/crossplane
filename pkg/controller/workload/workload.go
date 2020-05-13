@@ -1,5 +1,5 @@
 /*
-Copyright 2018 The Crossplane Authors.
+Copyright 2019 The Crossplane Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -17,28 +17,25 @@ limitations under the License.
 package workload
 
 import (
-	"sigs.k8s.io/controller-runtime/pkg/manager"
+	ctrl "sigs.k8s.io/controller-runtime"
 
-	"github.com/crossplaneio/crossplane/pkg/controller/workload/kubernetes/application"
-	"github.com/crossplaneio/crossplane/pkg/controller/workload/kubernetes/resource"
-	"github.com/crossplaneio/crossplane/pkg/controller/workload/kubernetes/scheduler"
+	"github.com/crossplane/crossplane-runtime/pkg/logging"
+
+	"github.com/crossplane/crossplane/pkg/controller/workload/kubernetes/application"
+	"github.com/crossplane/crossplane/pkg/controller/workload/kubernetes/resource"
+	"github.com/crossplane/crossplane/pkg/controller/workload/kubernetes/scheduler"
+	"github.com/crossplane/crossplane/pkg/controller/workload/kubernetes/target"
 )
 
-func init() {
-	AddToManagerFuncs = append(AddToManagerFuncs,
-		application.Add,
-		resource.Add,
-		scheduler.Add,
-	)
-}
-
-// AddToManagerFuncs is a list of functions to add all Controllers to the Manager
-var AddToManagerFuncs []func(manager.Manager) error
-
-// AddToManager adds all Controllers to the Manager
-func AddToManager(m manager.Manager) error {
-	for _, f := range AddToManagerFuncs {
-		if err := f(m); err != nil {
+// Setup workload controllers.
+func Setup(mgr ctrl.Manager, l logging.Logger) error {
+	for _, setup := range []func(ctrl.Manager, logging.Logger) error{
+		application.Setup,
+		resource.Setup,
+		scheduler.Setup,
+		target.Setup,
+	} {
+		if err := setup(mgr, l); err != nil {
 			return err
 		}
 	}

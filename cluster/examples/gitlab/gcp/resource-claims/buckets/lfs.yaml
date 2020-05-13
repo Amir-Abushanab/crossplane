@@ -3,9 +3,9 @@ apiVersion: storage.crossplane.io/v1alpha1
 kind: Bucket
 metadata:
   name: gitlab-lfs
-  namespace: default
 spec:
-  classReference:
-    name: standard-gcp-bucket
-    namespace: crossplane-system
-  name: gitlab-demo-lfs-%s
+  classSelector:
+    matchLabels:
+      example: "true"
+  writeConnectionSecretToRef:
+    name: gitlab-lfs

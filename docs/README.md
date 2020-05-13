@@ -1,28 +1,63 @@
-# Crossplane
+# Overview
 
-Crossplane is an open source multicloud control plane. It introduces workload and resource abstractions on-top of existing managed services that enables a high degree of workload portability across cloud providers. A single crossplane enables the provisioning and full-lifecycle management of services and infrastructure across a wide range of providers, offerings, vendors, regions, and clusters. Crossplane offers a universal API for cloud computing, a workload scheduler, and a set of smart controllers that can automate work across clouds.
+![Crossplane](media/banner.png)
 
-<h4 align="center"><img src="media/arch.png" alt="Crossplane" height="400"></h4>
+Crossplane is an open source control plane that allows you to manage
+applications and infrastructure the Kubernetes way. It provides the following
+features:
 
-Crossplane presents a declarative management style API that covers a wide range of portable abstractions including databases, message queues, buckets, data pipelines, serverless, clusters, and many more coming. It’s based on the declarative resource model of the popular [Kubernetes](https://github.com/kubernetes/kubernetes) project, and applies many of the lessons learned in container orchestration to multicloud workload and resource orchestration.
+- Deployment and management of cloud provider managed services using the
+  Kubernetes API.
+- Management and scheduling of configuration data across multiple Kubernetes
+  clusters.
+- Separation of concern between infrastructure owners, application owners, and
+  developers.
+- Infrastructure agnostic packaging of applications and their dependencies.
+- Scheduling applications into different clusters, zones, and regions.
 
-Crossplane supports a clean separation of concerns between developers and administrators. Developers define workloads without having to worry about implementation details, environment constraints, and policies. Administrators can define environment specifics, and policies. The separation of concern leads to a higher degree of reusability and reduces complexity.
+Crossplane does not:
 
-Crossplane includes a workload scheduler that can factor a number of criteria including capabilities, availability, reliability, cost, regions, and performance while deploying workloads and their resources. The scheduler works alongside specialized resource controllers to ensure policies set by administrators are honored.
+- Require that you run your workloads on Kubernetes.
+- Manage the data plane across Kubernetes clusters.
+- Manage or provision non-hosted Kubernetes clusters.
 
-## Architecture and Vision
+Crossplane can be [installed] into any Kubernetes cluster, and is compatible
+with any Kubernetes-native project. It manages external services by installing
+[Custom Resource Definitions] (CRDs) and [reconciling] instances of those Custom
+Resources. Crossplane is built to be extensible, meaning that anyone can add
+functionality for an new or existing cloud provider.
 
-The full architecture and vision of the Crossplane project is described in depth in the [architecture document](https://docs.google.com/document/d/1whncqdUeU2cATGEJhHvzXWC9xdK29Er45NJeoemxebo/edit?usp=sharing). It is the best place to learn more about how Crossplane fits into the Kubernetes ecosystem, the intended use cases, and comparisons to existing projects.
+Crossplane is comprised of four main components:
 
-## Table of Contents
+1. **Core Crossplane**: the set of Kubernetes CRDs and controllers that manage
+   installation of `providers`, `stacks`, and `applications`, as well as the
+   scheduling of configuration data to remote Kubernetes clusters.
+2. **Providers**: the set of Kubernetes CRDs and controllers that provision and
+   manage services on cloud providers. A cloud provider is any service that
+   exposes infrastructure via an API.
+    - Examples: [Google Cloud Platform], [Amazon Web Services], [Azure],
+      [Alibaba], [Github]
+3. **Stacks**: a bundled set of custom resources that together represent an
+   environment on a cloud provider. The bundle of instances can be created by a
+   single custom resource.
+   - Examples: [Sample GCP Stack], [Sample AWS Stack], [Sample Azure Stack]
+4. **Applications**: a deployable unit of code and configuration, which, when
+   created, may involve provisioning new services which are managed by a
+   `provider`, or consuming services created by a `stack`.
+    - Examples: [Wordpress]
 
-* [Quick Start Guide](quick-start.md)
-* [Getting Started](getting-started.md)
-  * [Installing Crossplane](install-crossplane.md)
-  * [Adding Your Cloud Providers](cloud-providers.md)
-  * [Deploying Workloads](deploy.md)
-  * [Running Resources](running-resources.md)
-  * [Troubleshooting](troubleshoot.md)
-* [Concepts](concepts.md)
-* [FAQs](faqs.md)
-* [Contributing](contributing.md)
+<!-- Named Links -->
+
+[installed]: getting-started/install.md
+[Custom Resource Definitions]: https://kubernetes.io/docs/concepts/extend-kubernetes/api-extension/custom-resources/
+[reconciling]: https://kubernetes.io/docs/concepts/architecture/controller/
+[Google Cloud Platform]: https://github.com/crossplane/provider-gcp
+[Amazon Web Services]: https://github.com/crossplane/provider-aws
+[Azure]: https://github.com/crossplane/provider-azure
+[Alibaba]: https://github.com/crossplane/provider-alibaba
+[Github]: https://github.com/crossplane/provider-github
+[Sample GCP Stack]: https://github.com/crossplane/stack-gcp-sample
+[Sample AWS Stack]: https://github.com/crossplane/stack-aws-sample
+[Sample Azure Stack]: https://github.com/crossplane/stack-azure-sample
+[Wordpress]: https://github.com/crossplane/app-wordpress
+

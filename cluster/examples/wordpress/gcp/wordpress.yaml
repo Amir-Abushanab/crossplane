@@ -10,20 +10,23 @@ type: Opaque
 data:
   credentials.json: BASE64ENCODED_GCP_SQL_CREDS
 ---
-apiVersion: database.gcp.crossplane.io/v1alpha1
-kind: CloudsqlInstance
+apiVersion: database.gcp.crossplane.io/v1beta1
+kind: CloudSQLInstance
 metadata:
   labels:
   name: crossplane-wordpress-cloudsql
 spec:
   providerRef:
-    name: gcp-sql-provider
-  tier: db-n1-standard-1
-  region: us-west2
-  databaseVersion: MYSQL_5_7
-  storageType: PD_SSD
-  storageGB: 10
-  connectionSecretRef:
+    name: example
+  forProvider:
+    region: us-west2
+    databaseVersion: MYSQL_5_7
+    settings:
+      tier: db-n1-standard-1
+      dataDiskType: PD_SSD
+      dataDiskSizeGb: 10
+  writeConnectionSecretToRef:
+    namespace: crossplane-system
     name: demo-database-connection
 ---
 apiVersion: extensions/v1beta1
